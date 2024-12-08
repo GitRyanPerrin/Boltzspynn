@@ -4,131 +4,110 @@ from itertools import repeat
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import eigh
-from scipy.integrate import simps
+from scipy.integrate import simpson
 
 import input_data as ip
-from hamiltonian import Hmat as Hmat_tube
-from hamiltonian import quantum_numbers
-from hamiltonian_scroll import Hmat as Hmat_scroll
+from hamiltonian import Hmat
 from fermi_derivative import fermi_derivative
-from density import calc_fermi, calc_ndens
-from spin_cond_111 import vzr as vzr_tube
+from density import calc_fermi
+from calc_conductivities import calc_charge_conductivity
 from spin_cond_111 import vzp as vzp_tube
-from spin_cond_111 import vzz as vzz_tube
 from spin_cond_scroll import vzr as vzr_scroll
 from spin_cond_scroll import vzp as vzp_scroll
 from spin_cond_scroll import vzz as vzz_scroll
 
-def calc_band_structure(k, alphaR=ip.alphaR, betaD=ip.betaD, system='tube', Nm=10):
+def calc_conds(k, v, vs, E, mu, T):
 
     Nk = len(k)
+    NB = E.shape[0]
 
-    with ProcessPoolExecutor() as pool:
-        if system == 'tube':
-            H_fut = pool.map(Hmat_tube,
-                k,
-                repeat(ip.B),
-                repeat(ip.theta),
-                repeat(Nm),
-                repeat(alphaR),
-                repeat(betaD)
-            )
-        if system == 'scroll':
-            H_fut = pool.map(Hmat_scroll,
-                k,
-                repeat(ip.B),
-                repeat(ip.theta),
-                repeat(Nm),
-                repeat(alphaR),
-                repeat(betaD)
-            )
-    H = np.array([fut for fut in H_fut])
-    E = np.zeros(Nk, dtype=object)
-    V = np.zeros(Nk, dtype=object)
-    for ik in range(Nk):
-        E[ik], V[ik] = eigh(H[ik], lower=True)
-    E = np.stack(E)
-    V = np.stack(V)
+    fermi = np.stack([fermi_derivative(k, E[ib], mu, T, order=1) for ib in range(NB)])
 
-    norm = np.stack([np.real(np.sum(V[ik]@V[ik].conj().T)) for ik in range(Nk)])
-
-    v = np.gradient(H, axis=0)
-    v = np.stack([V[ik].conj().T@v[ik]@V[ik]/norm[ik] for ik in range(Nk)])
-    v = np.stack([np.diagonal(v[ik]) for ik in range(Nk)])
-    v = v/ip.hbar
-
-    return E, V, v, norm
-
-def calc_charge_conductivity(k, v, E, V, chem_potential, T=0.1):
-
-    Nk = len(k)
-    Nmu = len(chem_potential)
-
-    fermi = np.stack([fermi_derivative(k, E, mu, T, order=1) for mu in chem_potential])
-
-    cond = np.stack([[v[ik]*v[ik]*fermi[imu,ik] for ik in range(Nk)] for imu in range(Nmu)])
-    cond = -np.sum([simps(cond[imu], k, axis=0) for imu in range(Nmu)],axis=1)
-
+    cond = np.stack([[v[ib, ik]*v[ib, ik]*fermi[ib, ik] for ik in range(Nk)] for ib in range(NB)])
+    cond = -np.sum([simpson(cond[ib], x=k, axis=0) for ib in range(NB)],axis=1)
     coeff = ip.e**2*ip.tau_e/2/np.pi/ip.area
 
-    return cond*coeff
+    fermi = np.stack([fermi_derivative(k, E[ib], mu, T, order=2) for ib in range(NB)])
 
-def calc_spin_conductivity(k, v, E, V, norm, mu, T=0.1, system='tube', polarization='p'):
+    scond = np.stack([[v[ib,ik]*v[ib,ik]*vs[ib,ik]*fermi[ib,ik] for ik in range(Nk)] for ib in range(NB)])
+    scond = np.sum([simpson(scond[ib], x=k, axis=0) for ib in range(NB)],axis=1)
+    scoeff = ip.e**2*ip.tau_s**2/2/np.pi/ip.area*ip.hbar/4/ip.e/1e3
 
-    Nk = len(k)
+    #return np.array([cond*coeff, scond*scoeff], dtype=object)
+    return cond*coeff, scond*scoeff
 
-    with ProcessPoolExecutor() as pool:
-        if system == 'tube' and polarization == 'p':
-            v_fut = pool.map(vzp_tube, k)
-        if system == 'tube' and polarization == 'z':
-            return np.zeros(Nmu)
-        if system == 'scroll' and polarization == 'r':
-            v_fut = pool.map(vzr_scroll, k)
-        if system == 'scroll' and polarization == 'p':
-            v_fut = pool.map(vzp_scroll, k)
-        if system == 'scroll' and polarization == 'z':
-            v_fut = pool.map(vzz_scroll, k)
-        
-    vs = np.stack([fut for fut in v_fut])
-
-    vs = np.stack([V[ik].conj().T@vs[ik]@V[ik]/norm[ik] for ik in range(Nk)])
-    vs = np.stack([np.diagonal(vs[ik])*ip.hbar/2 for ik in range(Nk)])
-    
-    fermi = np.stack(fermi_derivative(k, E, mu, T, order=2))
-
-    cond = np.stack([v[ik]*v[ik]*vs[ik]*fermi[ik] for ik in range(Nk)])
-    cond = np.sum(simps(cond, k, axis=0),axis=0)
-
-    coeff = ip.e**2*ip.tau_s**2/2/np.pi/ip.area*ip.hbar/4/ip.e/1e3
-
-    return cond*coeff
-
-if __name__=="__main__":
+def svA(system, polarization):
 
     k0 = 2*np.pi/ip.R
     Nk = 2000
     k = np.linspace(-k0, k0, Nk)
-    NA = 20
-    A = np.linspace(0, 50e-12*ip.e, NA)
-    #A = np.linspace(-ip.alphaR, ip.alphaR, NA)
-    scond = np.zeros(NA, dtype=object)
-    for ia, a in enumerate(A):
-        #E, V, v, norm = calc_band_structure(k, alphaR=ip.alphaR, betaD=a, system='scroll')
-        E, V, v, norm = calc_band_structure(k, alphaR=a, betaD=ip.betaD, system='tube')
-        mu = np.min(E[:,4])
-        #mu = 0.0*ip.e/1e3
-        scond[ia] = calc_spin_conductivity(k, v, E, V, norm, mu, 0.1, system='tube', polarization='p')
 
-    plt.ylabel(r'$\sigma^{(2),\varphi}_z$')
-    #plt.ylabel(r'$\sigma^{(2),z}_z$')
-    #plt.xlabel(r'$\alpha/\beta$')
-    #plt.xlabel(r'$\beta/\alpha$')
-    #plt.plot(A/ip.alphaR, scond/1e9, 'k')
-    plt.plot(A/ip.e*1e12, scond/1e9, 'k')
-    plt.plot(A/ip.e*1e12, np.gradient(scond/1e9,axis=0), 'b', linestyle='dotted')
-    plt.axvline(x=20,c='gray',linestyle='dotted')
-    plt.axvline(x=26.3,c='gray',linestyle='dotted')
-    plt.axvline(x=28.3,c='gray',linestyle='dotted')
+    NA = 10
+    A0 = ip.alphaR
+    A = np.linspace(0, A0, NA)
+    H = np.zeros(NA, dtype=object)
+    E = np.zeros([NA, Nk], dtype=object)
+    V = np.zeros([NA, Nk], dtype=object)
+    for ia, a in enumerate(A):
+        with ProcessPoolExecutor() as pool:
+            H_fut = pool.map(Hmat,
+                k, 
+                repeat(0), 
+                repeat(ip.theta),
+                repeat(10),
+                A
+            )
+        H[ia] = np.array([fut for fut in H_fut])
+
+    H = np.stack(H, axis=0)
+
+    for ia in range(NA):
+        for ik in range(Nk):
+            E[ia, ik], V[ia, ik] = eigh(H[ia, ik])
+    Nstat = E[0,0].shape[0]
+    E = np.stack(np.hstack(E)).reshape([NA, Nk, Nstat])
+    V = np.stack(np.hstack(V)).reshape([NA, Nk, Nstat, Nstat])
+    norm = np.stack([[np.real(np.sum(V[ia,ik]@V[ia,ik].conj().T)) for ik in range(Nk)] for ia in range(NA)])
+
+    T = 0.1
+    mu = [-0.2*ip.e/1e3, 0.0, 0.2*ip.e/1e3, 0.9*ip.e/1e3]
+    c = ['b', 'r', 'k', 'g']
+
+    v = np.gradient(H, axis=1)/ip.hbar
+    v = np.stack([[np.diagonal(V[ib, ik].conj().T@v[ib, ik]@V[ib, ik]/norm[ib,ik]) for ik in range(Nk)] for ib in range(NA)])
+
+    for ib, b in enumerate(A):
+        with ProcessPoolExecutor() as pool:
+            if system == 'tube' and polarization == 'p':
+                v_fut = pool.map(vzp_tube, k)
+            if system == 'tube' and polarization == 'z':
+                return np.zeros(NA)
+            if system == 'scroll' and polarization == 'r':
+                v_fut = pool.map(vzr_scroll, k)
+            if system == 'scroll' and polarization == 'p':
+                v_fut = pool.map(vzp_scroll, k)
+            if system == 'scroll' and polarization == 'z':
+                v_fut = pool.map(vzz_scroll, k)
+        
+    vs = np.stack([fut for fut in v_fut])
+    vs = np.stack([[np.diagonal(V[ia, ik].conj().T@vs[ik]@V[ia, ik])*ip.hbar/2/norm[ia,ik] for ik in range(Nk)] for ia in range(NA)])
+
+    cond = np.zeros(4, dtype=object)
+    scond = np.zeros(4, dtype=object)
+    for imu, m in enumerate(mu):
+        cond[imu], scond[imu] = calc_conds(k, v, vs, E, m, T)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+    plt.autoscale()
+ 
+    ax1.set_ylabel(r"$\sigma_e^{(1)}$")
+
+    ax2.set_ylabel(r"$\sigma_\sigma^{\varphi(2)}$")
+    ax2.set_xlabel(r"$\alpha$")
+
+    [ax1.plot(A, cond[imu]/1e9, 'k') for imu in range(4)]
+    [ax2.plot(A, scond[imu]/1e9, 'k') for imu in range(4)]
     plt.show()
-    
-    
+
+if __name__=="__main__":
+    svA(system='tube', polarization='p')

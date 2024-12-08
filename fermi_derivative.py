@@ -34,11 +34,6 @@ def ddFD(E, mu, T):
     kBT = ip.kB*T
     return -(1-2*FD(E,mu,T))*dFD(E,mu,T)/kBT
 
-def dddFD(E, mu, T):
-
-    kBT = ip.kB*T
-    return (np.tanh((E-mu)/kBT)**2- 1/np.cosh(E-mu/kBT)**2)*dFD(E,mu,T)/kBT**2
-
 def fermi_derivative(k, eigvals, mu, T, order=1):
 
     '''
@@ -61,7 +56,5 @@ def fermi_derivative(k, eigvals, mu, T, order=1):
                 fermi[ik,a] = dFD(eigvals[ik,a], mu, T)
             if order == 2:
                 fermi[ik,a] = ddFD(eigvals[ik,a], mu, T)
-            if order == 3:
-                fermi[ik,a] = dddFD(eigvals[ik,a], mu, T)
 
     return fermi

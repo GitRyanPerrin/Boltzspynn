@@ -3,7 +3,7 @@ from itertools import repeat
 
 import numpy as np
 from scipy.linalg import eigh
-from scipy.integrate import simps
+from scipy.integrate import simpson
 import matplotlib.pyplot as plt
 
 import input_data as ip
@@ -51,7 +51,7 @@ def vzp(k, B=ip.B, Nm=10, alphaR=ip.alphaR, betaD=ip.betaD, R=ip.R):
         m1 = int(qn[a1, 0])
         s1 = int(qn[a1, 1])
 
-        v[a1, a1] += alphaR/hbar
+        v[a1, a1] += alphaR/hbar/2
 
         for a2 in range(Nstat):
             m2 = int(qn[a2, 0])
@@ -123,7 +123,7 @@ if __name__=="__main__":
     fermi = np.stack([fermi_derivative(k, E, mu, T, order=2) for mu in chem_potential])
 
     cond = np.stack([[v[ik]*v[ik]*vs[ik]*fermi[imu,ik] for ik in range(Nk)] for imu in range(Nmu)])
-    cond = np.sum([simps(cond[imu], k, axis=0) for imu in range(Nmu)],axis=1)
+    cond = np.sum([simpson(cond[imu], x=k, axis=0) for imu in range(Nmu)],axis=1)
     #print(cond.shape)
 
     fig, (ax1, ax2) = plt.subplots(2,1)

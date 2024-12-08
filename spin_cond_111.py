@@ -3,7 +3,7 @@ from itertools import repeat
 
 import numpy as np
 from scipy.linalg import eigh
-from scipy.integrate import simps
+from scipy.integrate import simpson
 import matplotlib.pyplot as plt
 
 import input_data as ip
@@ -31,11 +31,12 @@ def vzr(k, B=ip.B, Nm=10, alphaR=ip.alphaR, betaD=ip.betaD, R=ip.R):
             m2 = int(qn[a2, 0])
             s2 = int(qn[a2, 1])
 
-            if m1 == m2+1 and s1 == -s2:
-                v[a1, a2] += hbar*k/meff
+            if m1-m2+s1==0 and s1 == -s2:
+                v[a1, a2] += k/meff
 
-            if abs(m1-m2) == 3 and s1 == s2:
-                v[a1, a2] += betaD/np.sqrt(6)/hbar/2
+            #if abs(m1-m2)==2 and s1 == -s2:
+            if (m1-m2+3 == 0 or m1-m2-3==0) and s1 == -s2:
+                v[a1, a2] += 1.0j*betaD/np.sqrt(6)/hbar*s1
 
             v[a2,a1] += np.conjugate(v[a1,a2])
     
@@ -55,7 +56,7 @@ def vzp(k, B=ip.B, Nm=10, alphaR=ip.alphaR, betaD=ip.betaD, R=ip.R):
         m1 = int(qn[a1, 0])
         s1 = int(qn[a1, 1])
 
-        v[a1, a1] += alphaR/hbar
+        v[a1, a1] += alphaR/hbar/2
         #v[a1, a1] += alphaR/2
 
         for a2 in range(Nstat):
@@ -126,7 +127,7 @@ if __name__=="__main__":
 
     T = 0.2
     Nmu = 150
-    dmu = 2.5*ip.e/1e3
+    dmu = 5*ip.e/1e3
     band_min = np.min(E)-0.2*ip.e/1e3
     band_max = np.min(E)+dmu
     chem_potential = np.linspace(band_min, band_max, Nmu)
@@ -134,7 +135,7 @@ if __name__=="__main__":
     fermi = np.stack([fermi_derivative(k, E, mu, T, order=2) for mu in chem_potential])
 
     cond = np.stack([[v[ik]*v[ik]*vs[ik]*fermi[imu,ik] for ik in range(Nk)] for imu in range(Nmu)])
-    cond = np.sum([simps(cond[imu], k, axis=0) for imu in range(Nmu)],axis=1)
+    cond = np.sum([simpson(cond[imu], x=k, axis=0) for imu in range(Nmu)],axis=1)
     #print(cond.shape)
 
     #coeff = ip.e**2*ip.tau_e/2/np.pi/ip.area/ip.hbar**2

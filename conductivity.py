@@ -4,7 +4,7 @@ from itertools import repeat
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.linalg import eigh
-from scipy.integrate import simps
+from scipy.integrate import simpson
 
 import input_data as ip
 #from hamiltonian import Hmat, quantum_numbers
@@ -51,8 +51,8 @@ def main():
     energy_coeff = np.stack([[(E[ik] - mu)/ip.kB/T for ik in range(Nk)] for mu in chem_potential])
     econd = np.stack([[np.diagonal(v[ik])*np.diagonal(v[ik])*fermi[imu,ik] for ik in range(Nk)] for imu in range(Nmu)])
     tcond = np.stack([[energy_coeff[imu, ik]*np.diagonal(v[ik])*np.diagonal(v[ik])*fermi[imu,ik] for ik in range(Nk)] for imu in range(Nmu)])
-    econd = -np.sum([simps(econd[imu], k, axis=0) for imu in range(Nmu)],axis=1)
-    tcond = -np.sum([simps(tcond[imu], k, axis=0) for imu in range(Nmu)],axis=1)
+    econd = -np.sum([simpson(econd[imu], x=k, axis=0) for imu in range(Nmu)],axis=1)
+    tcond = -np.sum([simpson(tcond[imu], x=k, axis=0) for imu in range(Nmu)],axis=1)
     #plt.plot(chem_potential, ndens/1e23)
     #plt.show()
 
